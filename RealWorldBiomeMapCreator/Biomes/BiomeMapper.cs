@@ -4,25 +4,19 @@ namespace RealWorldBiomeMapCreator.Biomes;
 
 public static class BiomeMapper
 {
-    // @TODO implementeer dit
     public static Biome DetermineBiome(Rgba32 color)
-    {
-        // Voorbeeldlogica om kleuren aan biomes te koppelen
-        if (color.R > 200 && color.G > 200 && color.B > 200)
-        {
-            return Biome.SNOWY_PLAINS;
-        }
-        else if (color.R < 50 && color.G < 50 && color.B > 200)
-        {
-            return Biome.OCEAN;
-        }
-        else if (color.R > 200 && color.G > 150 && color.B < 50)
-        {
-            return Biome.DESERT;
-        }
-        else
-        {
-            return Biome.PLAINS;
-        }
-    }
+{
+    // Converteer de kleur naar een tuple (we love tuples)
+    var targetColor = (color.R, color.G, color.B);
+
+    // Vind de dichtstbijzijnde kleur in de BiomeColorMap op basis van de afstand
+    return BiomeColors.BiomeColorMap
+        .OrderBy(b => Math.Sqrt(
+            Math.Pow(b.Value.r - targetColor.Item1, 2) +
+            Math.Pow(b.Value.g - targetColor.Item2, 2) +
+            Math.Pow(b.Value.b - targetColor.Item3, 2)
+        ))
+        .First()
+        .Key;
+}
 }

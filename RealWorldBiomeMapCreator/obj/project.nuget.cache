@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "4Dhh8dE02NM=",
+  "success": true,
+  "projectFilePath": "X:\\repos\\RealWorldBiomeMapCreator\\RealWorldBiomeMapCreator\\RealWorldBiomeMapCreator.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\svenf\\.nuget\\packages\\sixlabors.imagesharp\\3.1.5\\sixlabors.imagesharp.3.1.5.nupkg.sha512"
+  ],
+  "logs": []
+}

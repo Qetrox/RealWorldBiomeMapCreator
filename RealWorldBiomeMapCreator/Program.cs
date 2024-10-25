@@ -1,4 +1,10 @@
-﻿using RealWorldBiomeMapCreator.Tiles;
+﻿using System.Text.Json;
+using System.Text.Json.Serialization;
+using RealWorldBiomeMapCreator.Biomes;
+using RealWorldBiomeMapCreator.Height;
+using RealWorldBiomeMapCreator.Tiles;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
 
 namespace RealWorldBiomeMapCreator;
 
@@ -7,34 +13,88 @@ public class Program
     public static async Task Main(string[] args)
     {
         TileDownloader tileDownloader = new TileDownloader();
-        
-        /*
-         Hieronder zien jullie een voorbeelduitwerking, van het downloaden en analyseren van 1 tile,
-         zoals jullie misschien al kunnen zien is dit nog niet af, daarnaast wordt de verkeerde tile gebruikt.
-         Plaatsnamen zijn namelijk zwarte letters en daarmee is geen Biome te maken.
-         Combineer minimaal 3 tiles met elkaar en bepaal welke Biome erbij hoort, er zijn veel Biomes (zie de Biome enum), dus denk goed na hoe je dit aanpakt!
-         
-         Bonus: Als je toch bezig bent met het kijken naar kaarten, bedenk welke hoogte daarbij hoort en sla deze samen met Biome op in de SurfaceSafer. 
-         
-         Het beste resultaat wint een prijs en wordt daarnaast daadwerkelijk gebruikt als basis voor een Minecraft World Generator
-         die we lanceren op de Game Night.
-         
-         BELANGRIJK! Download niet teveel tiles achter elkaar, mogelijk wordt je dan geblokkeerd dus ga hier zuinig mee om!
-         Cache dus de tiles door ze op te slaan naar een bestand en steeds te controleren of het bestand al bestaat!
-         */
-        
-        // Download de tile, probeer ook andere delen van de wereld uit voor de andere biomes.
-        
-        // Zoom werkt zo: Zoom 0 betekent, wereld is opgedeeld in 1x1 tile, zoom 1 betekent wereld is opgedeeld in 2x2 tiles, zoom 2 betekent wereld is opgedeeld in 4x4 tiles, zoom 3 betekent wereld is opgedeeld in 8x8 tiles.
-        // Dus zoom 7 zoals default hieronder betekent dat de wereld is opgedeeld in 128x128 stukken (tiles) (we tellen altijd vanaf 0 dus 0 t/m 127)
-        // Deze coordinaten zijn een deel van Nederland, het eindresultaat zal het liefste met zoom 9 moeten werken.
-        int worldX = 64;
-        int worldY = 42;
-        SateliteTile sateliteTile = new SateliteTile(await tileDownloader.DownloadTile(worldX, worldY, 7));
-        
-        // @TODO (Bonus) maak deze analyse multithreaded, zodat het sneller wordt om de hele wereld te laden.
-        sateliteTile.AnalyzeTile();
-        
-        // @TODO (Bonus) Doe iets met result? Save as file? Misschien weer als een image? Zorg ervoor dat de output makkelijk te lezen is.
+
+        Tuple<int, int> topLeft = new Tuple<int, int>(0, 0);
+        Tuple<int, int> botRight = new Tuple<int, int>(63, 63);
+        int zoomLevel = 6;
+
+        // Bereken de breedte en hoogte van het gebied
+        int width = botRight.Item1 - topLeft.Item1 + 1;
+        int height = botRight.Item2 - topLeft.Item2 + 1;
+
+        // Maak een lijst aan om de ultieme biomes op te slaan
+        List<Biome> ultimateBiomes = new List<Biome>(width * height);
+
+        // Download en analyseer de tiles in parallel
+        var tileTasks = new List<Task<(int x, int y, SateliteTile tile)>>();
+
+        for (int x = topLeft.Item1; x <= botRight.Item1; x++)
+        {
+            for (int y = topLeft.Item2; y <= botRight.Item2; y++)
+            {
+                int localX = x;
+                int localY = y;
+
+                // Voeg de download- en analyseer-taken toe aan de lijst
+                var task = Task.Run(async () =>
+                {
+                    var _tile = await tileDownloader.DownloadTile(localX, localY, zoomLevel);
+                    SateliteTile _sateliteTile = new SateliteTile(_tile, localX, localY, zoomLevel);
+                    await _sateliteTile.AnalyzeTile();
+                    return (localX, localY, _sateliteTile);
+                });
+
+                tileTasks.Add(task);
+            }
+        }
+
+        List<BiomeData> biomeDataList = new List<BiomeData>();
+
+        // Wacht tot alle taken zijn voltooid en verzamel de resultaten
+        var tiles = await Task.WhenAll(tileTasks);
+
+        // Maak een map van gedownloade tiles voor snelle toegang
+        var tileMap = tiles.ToDictionary(t => (t.x, t.y), t => t.tile);
+
+        // Bepaal voor elke tile de ultieme biome en sla deze op in de lijst
+        for (int y = topLeft.Item2; y <= botRight.Item2; y++)
+        {
+            for (int x = topLeft.Item1; x <= botRight.Item1; x++)
+            {
+                // Haal de huidige tile en de omliggende tiles op (kan null zijn als ze niet bestaan)
+                var tile = tileMap[(x, y)];
+                tileMap.TryGetValue((x, y + 1), out var tileN); // Tile noord
+                tileMap.TryGetValue((x + 1, y), out var tileE); // Tile oost
+                tileMap.TryGetValue((x, y - 1), out var tileS); // Tile zuid
+                tileMap.TryGetValue((x - 1, y), out var tileW); // Tile west
+
+                int _height = await HeightMapper.GetHeight(x, y, zoomLevel);
+                
+                // Bepaal de ultieme biome voor deze tile
+                Biome ultimateBiome = BiomeChooser.UltimateBiomeSingle(tile, tileN, tileE, tileS, tileW);
+
+                // Voeg de ultieme biome toe aan de lijst
+                ultimateBiomes.Add(ultimateBiome);
+                biomeDataList.Add(new BiomeData(x, y, ultimateBiome));
+            }
+        }
+
+        List<Biome> ultimateBiomes_ = await OceanMapper.CorrectOceanBiomes(ultimateBiomes, topLeft.Item1, topLeft.Item2, botRight.Item1, botRight.Item2, zoomLevel);
+
+        var options = new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            Converters = { new JsonStringEnumConverter() } // Dit zorgt ervoor dat enums als strings worden opgeslagen
+        };
+        string json = JsonSerializer.Serialize(ultimateBiomes_, options);
+        File.WriteAllText("biomes.json", json);
+        Console.WriteLine("Biomes with coordinates have been saved to biomes.json.");
+
+        // Gebruik de visualisatiefunctie om de biomes om te zetten naar een afbeelding
+        Image<Rgba32> biomeImage = BiomeVisualizer.CreateBiomeImage(width, height, ultimateBiomes_);
+
+        // Sla de afbeelding op
+        biomeImage.Save("output.png");
+        Console.WriteLine("De biome map is opgeslagen als 'output.png'.");
     }
 }

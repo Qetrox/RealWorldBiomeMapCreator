@@ -5,6 +5,6 @@ namespace RealWorldBiomeMapCreator.Tiles;
 
 public interface ITile
 {
-    public void AnalyzeTile();
-    public void GetTileData();
+    public Tuple<List<Biomes.Biome>, List<int>> AnalyzeTile();
+    public Tuple<List<Biomes.Biome>, List<int>> GetTileData();
 }
